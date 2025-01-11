@@ -1,0 +1,196 @@
+Image Colorization using GANs
+
+This document explains the process and code used to develop a Generative Adversarial Network (GAN) for colorizing black-and-white images from the CIFAR-10 dataset.
+
+Overview of the Task
+
+The objective is to train a GAN model to colorize grayscale (black-and-white) images using the following steps:
+
+Preprocess CIFAR-10 images to grayscale: Convert the CIFAR-10 dataset's color images into grayscale.
+
+Build a GAN: Create a GAN architecture comprising a generator and a discriminator.
+
+Train the GAN: Train the generator to produce realistic colorized images and the discriminator to distinguish real (original) images from fake (generated) ones.
+
+Fine-tune hyperparameters: Optimize the learning rate, batch size, and loss functions for improved performance.
+
+Visualize results: Compare colorized images to original color images.
+
+Step-by-Step Code Explanation
+
+1. Preprocessing the Dataset
+
+Goal: Convert CIFAR-10 dataset images to grayscale for input into the GAN.
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.datasets import cifar10
+from skimage.color import rgb2gray
+
+# Load CIFAR-10 dataset
+(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+
+# Normalize images to the range [0, 1]
+x_train = x_train.astype('float32') / 255.0
+x_test = x_test.astype('float32') / 255.0
+
+# Convert images to grayscale
+x_train_gray = np.array([rgb2gray(img) for img in x_train])
+x_test_gray = np.array([rgb2gray(img) for img in x_test])
+
+Explanation:
+
+rgb2gray: Converts RGB images into grayscale.
+
+Normalization: Scales pixel values to the range [0, 1] to improve GAN training stability.
+
+2. Building the GAN
+
+Generator
+
+Goal: Transform grayscale images into colorized RGB images.
+
+from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose
+from tensorflow.keras.models import Model
+
+def build_generator():
+    input_img = Input(shape=(32, 32, 1))  # Grayscale input
+
+    x = Conv2D(64, (3, 3), padding='same', activation='relu')(input_img)
+    x = Conv2D(128, (3, 3), padding='same', activation='relu')(x)
+    x = Conv2DTranspose(64, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
+    output_img = Conv2DTranspose(3, (3, 3), strides=(2, 2), padding='same', activation='sigmoid')(x)  # RGB output
+
+    generator = Model(input_img, output_img)
+    return generator
+
+Key Layers:
+
+Conv2D: Extracts features from grayscale images.
+
+Conv2DTranspose: Upscales images and introduces colorization.
+
+sigmoid: Outputs pixel values in the range [0, 1].
+
+Discriminator
+
+Goal: Distinguish between real and generated (fake) colorized images.
+
+from tensorflow.keras.layers import Dense, Flatten
+
+def build_discriminator():
+    input_img = Input(shape=(32, 32, 3))  # Colorized image input
+
+    x = Conv2D(64, (3, 3), padding='same', activation='relu')(input_img)
+    x = Conv2D(128, (3, 3), padding='same', activation='relu')(x)
+    x = Flatten()(x)
+    x = Dense(1, activation='sigmoid')(x)  # Real or fake output
+
+    discriminator = Model(input_img, x)
+    discriminator.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return discriminator
+
+Key Layers:
+
+Conv2D: Extracts features from color images.
+
+Dense: Outputs a single probability value indicating real or fake.
+
+GAN Model
+
+Goal: Combine the generator and discriminator for training.
+
+def build_gan(generator, discriminator):
+    discriminator.trainable = False
+    input_img = Input(shape=(32, 32, 1))  # Grayscale input
+    gen_img = generator(input_img)  # Colorized image
+    validity = discriminator(gen_img)  # Discriminator output
+
+    gan = Model(input_img, validity)
+    gan.compile(optimizer='adam', loss='binary_crossentropy')
+    return gan
+
+generator = build_generator()
+discriminator = build_discriminator()
+gan = build_gan(generator, discriminator)
+
+Details:
+
+discriminator.trainable = False: Ensures the discriminator remains fixed during generator training.
+
+3. Training the GAN
+
+Goal: Alternately train the generator and discriminator to improve colorization quality.
+
+def train_gan(generator, discriminator, gan, x_train_gray, x_train):
+    batch_size = 64
+    epochs = 10000
+    half_batch = batch_size // 2
+
+    for epoch in range(epochs):
+        # Train Discriminator
+        idx = np.random.randint(0, x_train_gray.shape[0], half_batch)
+        real_images = x_train[idx]
+        fake_images = generator.predict(x_train_gray[idx])
+
+        real_labels = np.ones((half_batch, 1))
+        fake_labels = np.zeros((half_batch, 1))
+
+        d_loss_real = discriminator.train_on_batch(real_images, real_labels)
+        d_loss_fake = discriminator.train_on_batch(fake_images, fake_labels)
+        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+
+        # Train Generator
+        idx = np.random.randint(0, x_train_gray.shape[0], batch_size)
+        g_loss = gan.train_on_batch(x_train_gray[idx], real_labels)
+
+        if epoch % 100 == 0:
+            print(f"{epoch} [D loss: {d_loss[0]} | D accuracy: {100*d_loss[1]}] [G loss: {g_loss}]")
+
+train_gan(generator, discriminator, gan, x_train_gray, x_train)
+
+Process:
+
+Train the discriminator on both real and fake images.
+
+Train the generator through the GAN model by fooling the discriminator.
+
+4. Visualizing Results
+
+Goal: Compare grayscale, colorized, and original color images.
+
+import matplotlib.pyplot as plt
+
+# Generate colorized images
+n_samples = 5
+sample_gray_images = x_test_gray[:n_samples]
+colorized_images = generator.predict(sample_gray_images)
+
+# Visualize grayscale, original, and colorized images
+fig, axes = plt.subplots(n_samples, 3, figsize=(10, 10))
+for i in range(n_samples):
+    axes[i, 0].imshow(sample_gray_images[i], cmap='gray')
+    axes[i, 1].imshow(x_test[i])
+    axes[i, 2].imshow(colorized_images[i])
+    axes[i, 0].set_title("Grayscale")
+    axes[i, 1].set_title("Original")
+    axes[i, 2].set_title("Colorized")
+    for ax in axes[i]:
+        ax.axis('off')
+plt.tight_layout()
+plt.show()
+
+Summary
+
+Dataset Preprocessing: Convert CIFAR-10 images to grayscale.
+
+GAN Components: Build generator and discriminator models.
+
+Training Loop: Alternately train generator and discriminator.
+
+Hyperparameter Tuning: Adjust batch size, epochs, and learning rates for optimal performance.
+
+Results Visualization: Compare grayscale and colorized images to evaluate the model's performance.
+
+This approach provides a structured framework for image colorization using GANs.
+
